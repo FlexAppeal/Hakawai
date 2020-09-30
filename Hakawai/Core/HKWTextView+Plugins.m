@@ -419,7 +419,7 @@ typedef NS_ENUM(NSInteger, HKWCycleFirstResponderMode) {
             break;
     }
 
-    [self becomeFirstResponder];
+    // [self becomeFirstResponder];
     // The following cancels any animation that is automatically triggered as part of rejecting an autocorrect
     //  suggestion
     if (cancelAnimation) {
