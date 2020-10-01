@@ -35,6 +35,15 @@ NS_ASSUME_NONNULL_BEGIN
 @interface HKWMentionsPluginV1 : NSObject <HKWMentionsPlugin>
 
 /*!
+ Manually start with mention creation
+ */
+- (void)beginMentionsCreationWithString:(NSString *)prefix
+                        alreadyInserted:(BOOL)alreadyInserted
+                  usingControlCharacter:(BOOL)usingControlCharacter
+                       controlCharacter:(unichar)character;
+/*!
+
+/*!
  Instantiate a mentions plug-in with the specified chooser mode, no control characters, and a default search length of
  3 characters.
  */
