@@ -47,6 +47,14 @@
  */
 -(void) textViewDidProgrammaticallyUpdate:(UITextView *)textView;
 
+/*!
+ If available, this method is called when the text view is about to engage in a programmatic custom pasting of text
+
+ @param textView Text view for paste
+ @param range Range for paste
+ */
+- (void)textView:(UITextView *)textView willCustomPasteTextInRange:(NSRange)range;
+
 @end
 
 @protocol HKWAbstractionLayerControlFlowPluginProtocol <HKWAbstractionLayerDelegate, HKWSimplePluginProtocol>

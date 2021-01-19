@@ -672,7 +672,7 @@
     BOOL delegateImplementsCustomTrimming = [delegate respondsToSelector:@selector(trimmedNameForEntity:)];
     BOOL delegateAllowsTrimming = NO;
     if ([strongCustomChooserViewDelegate respondsToSelector:@selector(entityCanBeTrimmed:)]) {
-        delegateAllowsTrimming = [delegate entityCanBeTrimmed:mention];
+        delegateAllowsTrimming = [strongCustomChooserViewDelegate entityCanBeTrimmed:mention];
     } else if ([delegate respondsToSelector:@selector(entityCanBeTrimmed:)]) {
         delegateAllowsTrimming = [delegate entityCanBeTrimmed:mention];
     }
@@ -1702,7 +1702,6 @@
                                                        location:location];
 }
 
-
 #pragma mark - Mentions creation state machine protocol
 
 - (CGRect)boundsForParentEditorView {
@@ -1797,7 +1796,7 @@
     }
 }
 
-- (void)createMention:(HKWMentionsAttribute *)mention startingLocation:(NSUInteger)location {
+- (void)createMention:(HKWMentionsAttribute *)mention cursorLocation:(NSUInteger)location {
     if (self.state != HKWMentionsStartDetectionStateCreatingMention || !mention) {
         return;
     }
@@ -2074,7 +2073,6 @@
     return correctedPoint.x + rect.size.width/2;
 }
 
-
 #pragma mark - Properties
 
 - (void)setState:(HKWMentionsState)state {
@@ -2088,13 +2086,13 @@
     if ([strongStateChangeDelegate respondsToSelector:@selector(mentionsPlugin:stateChangedTo:from:)]) {
         if (state == HKWMentionsStartDetectionStateCreatingMention && _state != HKWMentionsStartDetectionStateCreatingMention) {
             [strongStateChangeDelegate mentionsPlugin:self
-                                 stateChangedTo:HKWMentionsPluginStateCreatingMention
-                                           from:HKWMentionsPluginStateQuiescent];
+                                       stateChangedTo:HKWMentionsPluginStateCreatingMention
+                                                 from:HKWMentionsPluginStateQuiescent];
         }
         else if (state != HKWMentionsStartDetectionStateCreatingMention && _state == HKWMentionsStartDetectionStateCreatingMention) {
             [strongStateChangeDelegate mentionsPlugin:self
-                                 stateChangedTo:HKWMentionsPluginStateQuiescent
-                                           from:HKWMentionsPluginStateCreatingMention];
+                                       stateChangedTo:HKWMentionsPluginStateQuiescent
+                                                 from:HKWMentionsPluginStateCreatingMention];
         }
     }
 
@@ -2125,11 +2123,10 @@
 - (id<HKWMentionsCreationStateMachine>)creationStateMachine {
     if (HKWTextView.enableMentionsCreationStateMachineV2) {
         if (!_creationStateMachine) {
-            _creationStateMachine = [HKWMentionsCreationStateMachineV2 stateMachineWithDelegate:self];
+            _creationStateMachine = [HKWMentionsCreationStateMachineV2 stateMachineWithDelegate:self isUsingCustomChooserView:(self.customChooserViewDelegate != nil && HKWTextView.directlyUpdateQueryWithCustomDelegate)];
         }
         return _creationStateMachine;
     } else {
-        //TODO: init V1 version
         if (!_creationStateMachine) {
             _creationStateMachine = [HKWMentionsCreationStateMachineV1 stateMachineWithDelegate:self];
         }
@@ -2207,6 +2204,20 @@
  */
 - (unichar)getExplicitSearchControlCharacter {
     return self.creationStateMachine.explicitSearchControlCharacter;
+}
+
+- (void)textView:(__unused UITextView *)textView willCustomPasteTextInRange:(__unused NSRange)range {
+    return;
+}
+
+- (void)didUpdateKeyString:(nonnull NSString *)keyString
+          controlCharacter:(unichar)character {
+    // set up the chooser view prior to data request in order to support fully customized view
+    [self.creationStateMachine setupChooserViewIfNeeded];
+    __strong __auto_type strongCustomChooserViewDelegate = self.customChooserViewDelegate;
+    NSAssert(strongCustomChooserViewDelegate != nil, @"Must have a custom chooser view if the query is being updated directly via this method");
+    [strongCustomChooserViewDelegate didUpdateKeyString:keyString
+                                       controlCharacter:character];
 }
 
 #pragma mark - Developer
