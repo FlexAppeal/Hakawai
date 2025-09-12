@@ -1,20 +1,16 @@
 trigger:
 - master
 
-pr:
-  autoCancel: true
-  branches:
-    include:
-    - master
+pr: none
 
 pool:
-  vmImage: macOS-10.14
+  vmImage: macOS-11
   demands: xcode
 
 variables:
   workspace: 'Hakawai.xcworkspace'
   scheme: 'Hakawai'
-  xcodeVersion: '10'
+  xcodeVersion: '12'
 
 steps:
 - task: CocoaPods@0
@@ -39,5 +35,5 @@ steps:
     scheme: $(scheme)
     xcodeVersion: $(xcodeVersion)
     destinationPlatformOption: 'iOS'
-    destinationSimulators: 'iPhone X'
+    destinationSimulators: 'iPhone 12'
     publishJUnitResults: true

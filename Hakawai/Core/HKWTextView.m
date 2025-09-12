@@ -41,8 +41,9 @@
 @end
 
 static BOOL enableMentionsPluginV2 = NO;
-static BOOL enableMentionsCreationStateMachineV2 = NO;
 static BOOL directlyUpdateQueryWithCustomDelegate = NO;
+static BOOL enableControlCharactersToPrepend = NO;
+static BOOL enableControlCharacterMaxLengthFix = YES;
 
 @implementation HKWTextView
 
@@ -54,20 +55,28 @@ static BOOL directlyUpdateQueryWithCustomDelegate = NO;
     enableMentionsPluginV2 = enabled;
 }
 
-+ (BOOL)enableMentionsCreationStateMachineV2 {
-    return enableMentionsCreationStateMachineV2;
-}
-
-+ (void)setEnableMentionsCreationStateMachineV2:(BOOL)enabled {
-    enableMentionsCreationStateMachineV2 = enabled;
-}
-
 + (BOOL)directlyUpdateQueryWithCustomDelegate {
     return directlyUpdateQueryWithCustomDelegate;
 }
 
 + (void)setDirectlyUpdateQueryWithCustomDelegate:(BOOL)enabled {
     directlyUpdateQueryWithCustomDelegate = enabled;
+}
+
++ (BOOL)enableControlCharactersToPrepend {
+    return enableControlCharactersToPrepend;
+}
+
++ (BOOL)enableControlCharacterMaxLengthFix {
+    return enableControlCharacterMaxLengthFix;
+}
+
++ (void)setEnableControlCharacterMaxLengthFix:(BOOL)enabled {
+    enableControlCharacterMaxLengthFix = enabled;
+}
+
++ (void)setEnableControlCharactersToPrepend:(BOOL)enabled {
+    enableControlCharactersToPrepend = enabled;
 }
 
 #pragma mark - Lifecycle
@@ -231,10 +240,10 @@ static BOOL directlyUpdateQueryWithCustomDelegate = NO;
         BOOL implementsWillCustomPasteTextInRange = [self.controlFlowPlugin respondsToSelector:@selector(textView:willCustomPasteTextInRange:)];
         // If stringCopiedFromCurrentTextView is set and the proper callback exists to handle the update in the control flow plugin, insert the copied string
         // programmatically
-        if ([self.stringCopiedFromCurrentTextView length] > 0 && implementsWillCustomPasteTextInRange) {
-            __strong __auto_type copyString = self.stringCopiedFromCurrentTextView;
+        if (self.stringCopiedFromCurrentTextView && [self.stringCopiedFromCurrentTextView length] > 0 && implementsWillCustomPasteTextInRange) {
+            __strong NSAttributedString *copyString = self.stringCopiedFromCurrentTextView;
             // In order to maintain mentions styling, insert the saved copyString into the attributed text
-            NSUInteger cursorLocationAfterPaste = self.selectedRange.location+self.stringCopiedFromCurrentTextView.length;
+            NSUInteger cursorLocationAfterPaste = self.selectedRange.location + self.stringCopiedFromCurrentTextView.length;
             NSRange selectionRangeBeforePaste = self.selectedRange;
             // Let control plugin know that text will be pasted, so it can remove any existing mentions attributes at that point
             [self.controlFlowPlugin textView:self willCustomPasteTextInRange:self.selectedRange];
@@ -356,7 +365,7 @@ static BOOL directlyUpdateQueryWithCustomDelegate = NO;
     }
 }
 
--(void) textViewDidProgrammaticallyUpdate {
+- (void)textViewDidProgrammaticallyUpdate {
 
     if ([self.controlFlowPlugin respondsToSelector:@selector(textViewDidProgrammaticallyUpdate:)]) {
         [self.controlFlowPlugin textViewDidProgrammaticallyUpdate:self];

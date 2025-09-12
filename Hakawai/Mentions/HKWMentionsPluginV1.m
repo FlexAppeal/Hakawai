@@ -23,13 +23,12 @@
 #import "HKWMentionsAttribute.h"
 
 #import "_HKWMentionsStartDetectionStateMachine.h"
-#import "_HKWMentionsCreationStateMachineV2.h"
-#import "_HKWMentionsCreationStateMachineV1.h"
+#import "_HKWMentionsCreationStateMachine.h"
 #import "_HKWMentionsCreationStateMachine.h"
 
 #import "_HKWMentionsPrivateConstants.h"
 
-@interface HKWMentionsPluginV1 () <HKWMentionsStartDetectionStateMachineProtocol, HKWMentionsCreationStateMachineProtocol>
+@interface HKWMentionsPluginV1 () <HKWMentionsStartDetectionStateMachineProtocol, HKWMentionsCreationStateMachineDelegate>
 
 // State properties
 @property (nonatomic) HKWMentionsState state;
@@ -66,7 +65,7 @@
 @property (nonatomic) BOOL nextInsertionShouldBeIgnored;
 
 @property (nonatomic, strong) HKWMentionsStartDetectionStateMachine *startDetectionStateMachine;
-@property (nonatomic, strong) id<HKWMentionsCreationStateMachine> creationStateMachine;
+@property (nonatomic, strong) HKWMentionsCreationStateMachine *creationStateMachine;
 
 /*!
  The point at which the last character typed was inserted.
@@ -810,7 +809,7 @@
 
 - (void)toggleAutocorrectAsRequiredForRange:(NSRange)range {
     // PROVISIONAL FIX: Determine whether or not a mention exists, and disable or enable autocorrect
-    if (self.state == HKWMentionsPluginStateCreatingMention) {
+    if (self.state == HKWMentionsStartDetectionStateCreatingMention) {
         return;
     }
     __strong __auto_type parentTextView = self.parentTextView;
@@ -1433,7 +1432,7 @@
     [self.creationStateMachine dataReturnedWithEmptyResults:isEmptyResults keystringEndsWithWhiteSpace:keystringEndsWithWhiteSpace];
 }
 
--(void) textViewDidProgrammaticallyUpdate:(UITextView *)textView {
+- (void)textViewDidProgrammaticallyUpdate:(UITextView *)textView {
     if (self.state == HKWMentionsStartDetectionStateCreatingMention) {
         [self.creationStateMachine cancelMentionCreation];
     } else {
@@ -2120,18 +2119,11 @@
     return _startDetectionStateMachine;
 }
 
-- (id<HKWMentionsCreationStateMachine>)creationStateMachine {
-    if (HKWTextView.enableMentionsCreationStateMachineV2) {
-        if (!_creationStateMachine) {
-            _creationStateMachine = [HKWMentionsCreationStateMachineV2 stateMachineWithDelegate:self isUsingCustomChooserView:(self.customChooserViewDelegate != nil && HKWTextView.directlyUpdateQueryWithCustomDelegate)];
-        }
-        return _creationStateMachine;
-    } else {
-        if (!_creationStateMachine) {
-            _creationStateMachine = [HKWMentionsCreationStateMachineV1 stateMachineWithDelegate:self];
-        }
-        return _creationStateMachine;
+- (HKWMentionsCreationStateMachine *)creationStateMachine {
+    if (!_creationStateMachine) {
+        _creationStateMachine = [HKWMentionsCreationStateMachine stateMachineWithDelegate:self isUsingCustomChooserView:(self.customChooserViewDelegate != nil && HKWTextView.directlyUpdateQueryWithCustomDelegate)];
     }
+    return _creationStateMachine;
 }
 
 - (NSString *)pluginName {
@@ -2260,5 +2252,7 @@ NSString * _Nonnull nameForMentionsState(HKWMentionsState s) {
 @synthesize shouldEnableUndoUponUnregistration;
 
 @synthesize stateChangeDelegate;
+
+@synthesize shouldEnableEnhancedMentionReplacementRules;
 
 @end

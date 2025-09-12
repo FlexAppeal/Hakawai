@@ -22,18 +22,19 @@
 
 #import "HKWMentionsAttribute.h"
 
-#import "_HKWMentionsCreationStateMachineV2.h"
-#import "_HKWMentionsCreationStateMachineV1.h"
+#import "_HKWMentionsCreationStateMachine.h"
 #import "_HKWMentionsCreationStateMachine.h"
 
 #import "_HKWMentionsPrivateConstants.h"
 
-@interface HKWMentionsPluginV2 () <HKWMentionsCreationStateMachineProtocol>
+@interface HKWMentionsPluginV2 () <HKWMentionsCreationStateMachineDelegate>
 
-@property (nonatomic, strong) id<HKWMentionsCreationStateMachine> creationStateMachine;
+@property (nonatomic, strong) HKWMentionsCreationStateMachine *creationStateMachine;
 
 @property (nonatomic, strong) NSDictionary *mentionHighlightedAttributes;
 @property (nonatomic, strong) NSDictionary *mentionUnhighlightedAttributes;
+
+@property (nonatomic, strong, nullable) NSCharacterSet *controlCharactersToPrepend;
 
 @property (nonatomic, readwrite) HKWMentionsChooserPositionMode chooserPositionMode;
 
@@ -66,6 +67,15 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
 }
 
 + (instancetype)mentionsPluginWithChooserMode:(HKWMentionsChooserPositionMode)mode
+                            controlCharacters:(NSCharacterSet *_Null_unspecified)controlCharacterSet
+                   controlCharactersToPrepend:(NSCharacterSet *_Null_unspecified)controlCharactersToPrepend
+                                 searchLength:(NSInteger)searchLength {
+    HKWMentionsPluginV2 *mentionsPlugin = [self mentionsPluginWithChooserMode:mode controlCharacters:controlCharacterSet searchLength:searchLength];
+    mentionsPlugin.controlCharactersToPrepend = controlCharactersToPrepend;
+    return mentionsPlugin;
+}
+
++ (instancetype)mentionsPluginWithChooserMode:(HKWMentionsChooserPositionMode)mode
                             controlCharacters:(NSCharacterSet *)controlCharacterSet
                                  searchLength:(NSInteger)searchLength {
     return [self mentionsPluginWithChooserMode:mode
@@ -88,8 +98,8 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     return [self mentionsPluginWithChooserMode:mode
                              controlCharacters:controlCharacterSet
                                   searchLength:searchLength
-                   unhighlightedMentionAttributes:unhighlightedAttributes
-                     highlightedMentionAttributes:highlightedAttributes];
+                unhighlightedMentionAttributes:unhighlightedAttributes
+                  highlightedMentionAttributes:highlightedAttributes];
 }
 
 + (instancetype)mentionsPluginWithChooserMode:(HKWMentionsChooserPositionMode)mode
@@ -97,6 +107,36 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
                                  searchLength:(NSInteger)searchLength
                unhighlightedMentionAttributes:(NSDictionary *)unhighlightedAttributes
                  highlightedMentionAttributes:(NSDictionary *)highlightedAttributes {
+    return [self mentionsPluginWithChooserMode:mode
+                             controlCharacters:controlCharacterSet
+                    controlCharactersToPrepend:nil
+                                  searchLength:searchLength
+                unhighlightedMentionAttributes:unhighlightedAttributes
+                  highlightedMentionAttributes:highlightedAttributes];
+}
+
++ (instancetype)mentionsPluginWithChooserMode:(HKWMentionsChooserPositionMode)mode
+                            controlCharacters:(NSCharacterSet *_Null_unspecified)controlCharacterSet
+                   controlCharactersToPrepend:(NSCharacterSet *_Null_unspecified)controlCharactersToPrepend
+                                 searchLength:(NSInteger)searchLength
+               unhighlightedMentionAttributes:(NSDictionary *_Null_unspecified)unhighlightedAttributes
+                 highlightedMentionAttributes:(NSDictionary *_Null_unspecified)highlightedAttributes {
+    return [self mentionsPluginWithChooserMode:mode
+                             controlCharacters:controlCharacterSet
+                    controlCharactersToPrepend:controlCharactersToPrepend
+                                  searchLength:searchLength
+                unhighlightedMentionAttributes:unhighlightedAttributes
+                  highlightedMentionAttributes:highlightedAttributes
+         enableEnhancedMentionReplacementRules:false];
+}
+
++ (instancetype)mentionsPluginWithChooserMode:(HKWMentionsChooserPositionMode)mode
+                            controlCharacters:(NSCharacterSet *_Null_unspecified)controlCharacterSet
+                   controlCharactersToPrepend:(NSCharacterSet *_Null_unspecified)controlCharactersToPrepend
+                                 searchLength:(NSInteger)searchLength
+               unhighlightedMentionAttributes:(NSDictionary *_Null_unspecified)unhighlightedAttributes
+                 highlightedMentionAttributes:(NSDictionary *_Null_unspecified)highlightedAttributes
+        enableEnhancedMentionReplacementRules:(Boolean)enableEnhancedMentionReplacementRules {
     // Make sure iOS version is 7.1 or greater
     if (!HKW_systemVersionIsAtLeast(@"7.1")) {
         NSAssert(NO, @"Mentions plug-in is only supported for iOS 7.1 or later.");
@@ -105,7 +145,9 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     HKWMentionsPluginV2 *plugin = [[[self class] alloc] init];
     plugin.chooserPositionMode = mode;
     plugin.controlCharacterSet = controlCharacterSet;
+    plugin.controlCharactersToPrepend = controlCharactersToPrepend;
     plugin.implicitSearchLength = searchLength;
+    plugin.shouldEnableEnhancedMentionReplacementRules = enableEnhancedMentionReplacementRules;
 
     // Validate attribute dictionaries
     // (unhighlighted mention attributes)
@@ -698,7 +740,6 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
 
 /**
  Find the location for the end of the next word, starting at the given location.
-
  If we ever encounter a mention character, this word is invalid, and we return @c NSNotFound
 
  @param location location to begin search from
@@ -707,27 +748,38 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
  */
 - (NSUInteger)endOfValidWordInText:(nonnull NSString *)text afterLocation:(NSUInteger)location {
     NSUInteger i;
-    for(i = location; i < text.length ; i++) {
-        // If there is a mentions character before there is a whitespace, then this is not a valid word for querying
+    
+    // Combine punctuation and whitespace/newline characters
+    NSMutableCharacterSet *stoppingCharacterSet = [[NSCharacterSet whitespaceAndNewlineCharacterSet] mutableCopy];
+    // If enabled, stops at the punctuation characters as well.
+    if (self.shouldEnableEnhancedMentionReplacementRules) {
+        [stoppingCharacterSet formUnionWithCharacterSet:[NSCharacterSet punctuationCharacterSet]];
+    }
+
+    for (i = location; i < text.length; i++) {
+        // If there is a mentions attribute, this is not a valid word
         HKWMentionsAttribute *mentionAttribute = [self mentionAttributeAtLocation:i range:nil];
         if (mentionAttribute) {
             return NSNotFound;
         }
-        const unichar character = [text characterAtIndex:i];
-        if ([[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember:character]) {
+        
+        unichar character = [text characterAtIndex:i];
+        if ([stoppingCharacterSet characterIsMember:character]) {
             return i;
         }
     }
     return i;
 }
 
+
 /**
  Search backwards in a string for a character in the control character set
 
- @param text The text in which to perform a backwards search for a control character
- @returns Location for most recent control character in a string
+ @param text The text in which to perform a backwards search for a control character. Note that this text can be a trimmed one if the orignal text's length exceeds @c MAX_MENTION_QUERY_LENGTH .
+ @param locationOffsetInOriginalText The offset of @c originalText.length - @c MAX_MENTION_QUERY_LENGTH to locate the correct char.
+ @returns Location for most recent control character in a @c text
  */
-+ (NSUInteger)mostRecentControlCharacterLocationInText:(NSString *)text controlCharacterSet:(NSCharacterSet *)controlCharacterSet {
+- (NSUInteger)mostRecentControlCharacterLocationInText:(NSString *)text locationOffsetInOriginalText:(NSUInteger)locationOffsetInOriginalText {
     if (text.length == 0) {
         return NSNotFound;
     }
@@ -735,7 +787,15 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     for (int index = endOfTextIndex; index >= 0; index--) {
         NSUInteger unsignedIndex = (unsigned long)index;
         unichar character = [text characterAtIndex:unsignedIndex];
-        if ([controlCharacterSet characterIsMember:character]) {
+        if ([self.controlCharacterSet characterIsMember:character]) {
+            // If the most recent control character has mention attribute, return NSNotFound
+            // Note that here we need to add back the locationOffsetInOriginalText which represents `originalText.length - trimmedText.length`.
+            NSUInteger location = HKWTextView.enableControlCharacterMaxLengthFix ? (unsignedIndex + locationOffsetInOriginalText) : unsignedIndex;
+            if (HKWTextView.enableControlCharactersToPrepend
+                && [self.controlCharactersToPrepend characterIsMember:character]
+                && [self mentionAttributeAtLocation:location range:nil]) {
+                return NSNotFound;
+            }
             return unsignedIndex;
         }
     }
@@ -755,7 +815,8 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     NSUInteger maximumSearchIndex = (NSUInteger)MAX((int)location-MAX_MENTION_QUERY_LENGTH, 0);
     NSString *substringToSearchForControlChar = [substringUntilLocation substringFromIndex:maximumSearchIndex];
     // Find control character location
-    NSUInteger controlCharLocation = [HKWMentionsPluginV2 mostRecentControlCharacterLocationInText:substringToSearchForControlChar controlCharacterSet:self.controlCharacterSet];
+    NSUInteger controlCharLocation = [self mostRecentControlCharacterLocationInText:substringToSearchForControlChar
+                                                       locationOffsetInOriginalText:maximumSearchIndex];
     if (controlCharLocation != NSNotFound) {
         // If it exists, offset it by the search index to get actual location in the parent text view
         controlCharLocation = controlCharLocation + maximumSearchIndex;
@@ -1195,7 +1256,6 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     [self performMentionCreationEndCleanup];
 
     // Actually create the mention
-    NSString *mentionText = mention.mentionText;
     __strong __auto_type parentTextView = self.parentTextView;
     NSAssert(parentTextView.selectedRange.length == 0,
              @"Cannot create a mention unless cursor is in insertion mode.");
@@ -1207,8 +1267,17 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     NSRange rangeToTransform;
     // Find where previous control character was, and replace mention at that point
     NSString *substringUntilCursor = [parentTextView.text substringToIndex:cursorLocation];
-    NSUInteger controlCharLocation = [HKWMentionsPluginV2 mostRecentControlCharacterLocationInText:substringUntilCursor
-                                                                               controlCharacterSet:self.controlCharacterSet];
+    NSUInteger controlCharLocation = [self mostRecentControlCharacterLocationInText:substringUntilCursor locationOffsetInOriginalText:0];
+    // Prepend control character to mentionText if needed
+    if (HKWTextView.enableControlCharactersToPrepend && controlCharLocation != NSNotFound) {
+        unichar controlCharacter = [parentTextView.text characterAtIndex:controlCharLocation];
+        BOOL shouldPrependControlCharacter = [self.controlCharactersToPrepend characterIsMember:controlCharacter];
+        if (shouldPrependControlCharacter) {
+            // Use %C instead of %c for unichar
+            mention.mentionText = [NSString stringWithFormat:@"%C%@", controlCharacter, mention.mentionText];
+        }
+    }
+    NSString *mentionText = mention.mentionText;
     // Replace until the end of the word at the current cursor location
     NSUInteger endOfWordToReplace = [self endOfValidWordInText:parentTextView.text afterLocation:cursorLocation];
     rangeToTransform = NSMakeRange(controlCharLocation, endOfWordToReplace - controlCharLocation);
@@ -1234,6 +1303,23 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     }];
     // Move the cursor
     parentTextView.selectedRange = NSMakeRange(controlCharLocation + [mentionText length], 0);
+    
+    if (self.shouldEnableEnhancedMentionReplacementRules) {
+        // Check if the mention ends at the end of paragraph. If yes, then add a space.
+        NSUInteger insertionEndLocation = controlCharLocation + [mentionText length];
+        BOOL isAtEndOfParagraph = (insertionEndLocation == parentTextView.text.length ||
+                                   (insertionEndLocation < parentTextView.text.length &&
+                                    [parentTextView.text characterAtIndex:insertionEndLocation] == '\n'));
+        if (isAtEndOfParagraph) {
+            NSMutableAttributedString *mutableText = [parentTextView.attributedText mutableCopy];
+            NSAttributedString *space = [[NSAttributedString alloc] initWithString:@" " attributes:parentTextView.typingAttributes];
+            [mutableText insertAttributedString:space atIndex:insertionEndLocation];
+            parentTextView.attributedText = mutableText;
+            // Move cursor past the space
+            parentTextView.selectedRange = NSMakeRange(insertionEndLocation + 1, 0);
+        }
+    }
+    
     parentTextView.shouldRejectAutocorrectInsertions = NO;
 
     // Inform the delegate (if appropriate)
@@ -1429,19 +1515,11 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
     return [self.creationStateMachine getEntityChooserView];
 }
 
-- (id<HKWMentionsCreationStateMachine>)creationStateMachine {
-    if (HKWTextView.enableMentionsCreationStateMachineV2) {
-        if (!_creationStateMachine) {
-            _creationStateMachine = [HKWMentionsCreationStateMachineV2 stateMachineWithDelegate:self isUsingCustomChooserView:(self.customChooserViewDelegate != nil && HKWTextView.directlyUpdateQueryWithCustomDelegate)];
-        }
-        return _creationStateMachine;
-    } else {
-        //TODO: init V1 version
-        if (!_creationStateMachine) {
-            _creationStateMachine = [HKWMentionsCreationStateMachineV1 stateMachineWithDelegate:self];
-        }
-        return _creationStateMachine;
+- (HKWMentionsCreationStateMachine *)creationStateMachine {
+    if (!_creationStateMachine) {
+        _creationStateMachine = [HKWMentionsCreationStateMachine stateMachineWithDelegate:self isUsingCustomChooserView:(self.customChooserViewDelegate != nil && HKWTextView.directlyUpdateQueryWithCustomDelegate)];
     }
+    return _creationStateMachine;
 }
 
 - (NSString *)pluginName {
@@ -1547,5 +1625,7 @@ static int MAX_MENTION_QUERY_LENGTH = 100;
 @synthesize shouldEnableUndoUponUnregistration;
 
 @synthesize stateChangeDelegate;
+
+@synthesize shouldEnableEnhancedMentionReplacementRules;
 
 @end
